@@ -2,7 +2,7 @@
 % Please edit documentation in R/sim.R
 \name{cocoSim}
 \alias{cocoSim}
-\title{Marginal simulation of Gaussian processes with nonstationary covariance function}
+\title{Marginal and conditional simulation of Gaussian processes with nonstationary covariance function}
 \usage{
 cocoSim(coco.object, pars, n, seed, standardize, 
 type = 'classic', sim.type = NULL, cond.info = NULL)
@@ -15,20 +15,20 @@ each of the models}
 
 \item{n}{number of realizations to simulate}
 
-\item{seed}{seed number. defalt set to NULL.}
+\item{seed}{seed number. default set to NULL.}
 
 \item{standardize}{logical argument describing whether provided covariates
 should be standardize (TRUE) or not (FALSE). By default set to TRUE}
 
-\item{type}{wether parameters are related to a classical parameterization ('classic') or
-a difference parameterization 'diff' . Default set to 'classic'.}
+\item{type}{whether parameters are related to a classical parameterization ('classic') or
+a difference parameterization 'diff' . Default set to 'classic'. For 'sparse' coco objects, only 'diff' is available.}
 
 \item{sim.type}{if set 'cond' then a conditional simulation takes place.}
 
 \item{cond.info}{a list containing information to perform a conditional simulation.}
 }
 \value{
-a list() with the structure needed to fit cov.rns functions
+a matrix n x dim(data)[1]
 }
 \description{
 simulates a Gaussian process with nonstationary covariance function

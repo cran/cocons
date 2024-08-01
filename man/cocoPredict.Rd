@@ -4,19 +4,21 @@
 \alias{cocoPredict}
 \title{Prediction for object class coco}
 \usage{
-cocoPredict(coco.object, newdataset, newlocs, type = 'mean')
+cocoPredict(coco.object, newdataset, newlocs, type = 'mean', ...)
 }
 \arguments{
-\item{coco.object}{a coco object}
+\item{coco.object}{a fitted coco object}
 
-\item{newdataset}{a data.frame including covariates present in model.list}
+\item{newdataset}{a data.frame including covariates present in model.list at prediction locations}
 
-\item{newlocs}{a matrix with locations related to newdataset}
+\item{newlocs}{a matrix with locations related to prediction locations, matching indexing of newdataset}
 
-\item{type}{whether "mean" or "pred", which gives a point prediction as well as the prediction uncertainty}
+\item{type}{whether "mean" or "pred", which gives a point prediction for the former, as well as a combination of point prediction as well as prediction uncertainty for the latter}
+
+\item{...}{when coco.object has multiple realizations, specifying 'index.pred' specifying which column of coco.object\@z should be used to perform predictions}
 }
 \value{
-a list with mean predictions and CRPS values, latter if specified.
+a list with trend, and mean predictions and uncertainty quantification, if 'pred' is specified.
 }
 \description{
 Prediction for a fitted coco object.

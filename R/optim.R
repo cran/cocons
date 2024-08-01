@@ -1,74 +1,63 @@
 
 #' Optimizer for object class coco
-#' @description Optimizer based on Optimparallel L-BFGS-B optimizier for coco class. 
+#' @description Optimizer based on multi-thread Optimparallel L-BFGS-B optimizers.
+#' @details
+#'  Current implementations only allow single realizations for 'pmle' optim.type. 
 #' @usage cocoOptim(coco.object, boundaries = list(), 
-#' ncores = parallel::detectCores(), optim.control, optim.type,...)
+#' ncores = parallel::detectCores(), optim.control, optim.type)
 #' @param coco.object a coco object. See ?coco()
 #' @param boundaries if provided, a list with lower, init, and upper values. 
 #' if not is computed based on generic fast_init_boundaries()
-#' @param ncores number of cores for the optimization routine.
-#' @param optim.control number of cores for the optimization routine.
-#' @param optim.type Optimization approach.
-#' @param ... extra arguments passed to the optimparallel function
-#' @returns a coco object with an updated output slot, with extra information 
-#' with boundaries information
+#' @param ncores number of cores to be used for the optimization routine.
+#' @param optim.control list with settings to be passed to the optimparallel function
+#' @param optim.type Optimization approach: whether 'mle' for classical Maximum Likelihood approach, 
+#' or 'pmle' to factor out the spatial trend (when handling 'dense' coco objects), or
+#' to factor out the global marginal standard deviation parameter (when considering 'sparse' coco objects)
+#' @returns a fitted coco object
 #' @author Federico Blasi
 #' 
 cocoOptim <- function(coco.object, boundaries = list(), 
                        ncores = parallel::detectCores(), 
-                       optim.control = NULL, optim.type = 'mle', ...){
+                       optim.control = NULL, optim.type = "mle"){
   
   if(length(boundaries) > 0){
-    .coco.check.boundaries(boundaries)
+    .cocons.check.boundaries(boundaries)
   }
   
-  .coco.check.ncores(ncores)
-  .coco.check.z(coco.object@z) # again checking here due to object might be used to simulate and then attached the realization to x@z
+  .cocons.check.ncores(ncores)
+  
+  # Init objects
+  if(T){
+    
+    designMatrix <- cocons::getDesignMatrix(
+      model.list = coco.object@model.list,
+      data = coco.object@data
+    )
+    
+    if (length(boundaries) == 0) {
+      boundaries <- cocons::getBoundaries(
+        x = coco.object, 
+        lower.value = -2,
+        upper.value = 2
+      )
+    }
+    
+    # Categorical variables
+    # problem here: i can specify categorical values in data but then not use any in formula
+    if(!is.null(coco.object@info$cat.vars)){
+      tmp_info <- .cocons.setDesignMatrixCat(coco.object, designMatrix = designMatrix)
+      tmp_values <- tmp_info$tmp_values
+      empty_matrix <- tmp_info$empty_matrix
+    } else{
+      tmp_values <- cocons::getScale(designMatrix$model.matrix)
+      empty_matrix <- tmp_values$std.covs
+    }
+    
+  }
   
   if (coco.object@type == "dense") {
     
-    if(optim.type == 'mle'){
-      
-      designMatrix <- cocons::getDesignMatrix(
-        model.list = coco.object@model.list,
-        data = coco.object@data
-      )
-      
-      # If boundaries not provided, then some general boundaries are set
-      if (length(boundaries) == 0) {
-        boundaries <- cocons::getBoundaries(
-          x = coco.object, 
-          lower.value = -2,
-          upper.value = 2
-        )
-      }
-      
-      if(!is.null(coco.object@info$cat.vars)){
-        
-        to_not_std <- colnames(coco.object@data)[coco.object@info$cat.vars]
-        to_avoid_std <- colnames(designMatrix$model.matrix) %in% to_not_std
-        
-        tmp_values <- cocons::getScale(designMatrix$model.matrix[,!to_avoid_std])
-        
-        empty_matrix <- matrix(0, ncol = dim(designMatrix$model.matrix)[2], 
-                               nrow = dim(designMatrix$model.matrix)[1])
-        
-        empty_matrix[, !to_avoid_std] <- tmp_values$std.covs
-        empty_matrix[, to_avoid_std] <- designMatrix$model.matrix[, to_avoid_std]
-        
-        mean_vector_empty <- rep(0,dim(designMatrix$model.matrix)[2])
-        mean_sd_empty <- rep(1,dim(designMatrix$model.matrix)[2])
-        
-        mean_vector_empty[!to_avoid_std] <- tmp_values$mean.vector
-        mean_sd_empty[!to_avoid_std] <- tmp_values$sd.vector
-        
-        tmp_values$mean.vector <- mean_vector_empty
-        tmp_values$sd.vector <- mean_sd_empty
-        
-      } else{
-        tmp_values <- cocons::getScale(designMatrix$model.matrix)
-        empty_matrix <- tmp_values$std.covs
-      }
+    if(optim.type == "mle"){
       
       # Suggested by OptimParallel
       if(tolower(.Platform$OS.type) != "windows"){
@@ -78,7 +67,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       }
       
       parallel::setDefaultCluster(cl = cl)
-      parallel::clusterEvalQ(cl, library("coco"))
+      parallel::clusterEvalQ(cl, library("cocons"))
       
       args_optim <- list(
         "fn" = cocons::GetNeg2loglikelihood,
@@ -99,11 +88,12 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       # if optim.control not provided, then some general Optim.control is provided
       if (is.null(optim.control)) {
-        optim.control <- getOption("coco.Optim.Control")
+        optim.control <- getOption("cocons.Optim.Control")
       } else{
-        optim.control <- .coco.update.optim.control(optim.control)
+        optim.control <- .cocons.update.optim.control(optim.control)
       }
       
+      # Call optim routine
       output_dense <- do.call(what = optimParallel::optimParallel, args = c(
         args_optim,
         optim.control
@@ -123,61 +113,20 @@ cocoOptim <- function(coco.object, boundaries = list(),
       coco.object@info$boundaries <- boundaries
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
-      coco.object@info$optim.type <- 'mle'
+      coco.object@info$optim.type <- "mle"
       
       return(coco.object)
       
     }
     
-    if(optim.type == 'pmle'){
+    if(optim.type == "pmle"){
       
-      designMatrix <- cocons::getDesignMatrix(
-        model.list = coco.object@model.list,
-        data = coco.object@data
-      )
+      if(dim(coco.object@z)[2] > 1){stop('profile ML routines only handle single realizations.')}
       
-      if(!is.logical(designMatrix$par.pos$mean)){stop('profile ML only available when considering covariates in the trend')}
-      
-      if (length(boundaries) == 0) {
-        boundaries <- cocons::getBoundaries(
-          x = coco.object, 
-          lower.value = -3,
-          upper.value = 3
-        )
-      }
-      
-      # Categorical variables
-      # problem here: i can specify categorical values in data but then
-      # not use any in formula
-      if(!is.null(coco.object@info$cat.vars)){
-        
-        to_not_std <- colnames(coco.object@data)[coco.object@info$cat.vars]
-        to_avoid_std <- colnames(designMatrix$model.matrix) %in% to_not_std
-        
-        tmp_values <- cocons::getScale(designMatrix$model.matrix[,!to_avoid_std])
-        
-        empty_matrix <- matrix(0, ncol = dim(designMatrix$model.matrix)[2], 
-                               nrow = dim(designMatrix$model.matrix)[1])
-        
-        empty_matrix[, !to_avoid_std] <- tmp_values$std.covs
-        empty_matrix[, to_avoid_std] <- designMatrix$model.matrix[, to_avoid_std]
-        
-        mean_vector_empty <- rep(0,dim(designMatrix$model.matrix)[2])
-        mean_sd_empty <- rep(1,dim(designMatrix$model.matrix)[2])
-        
-        mean_vector_empty[!to_avoid_std] <- tmp_values$mean.vector
-        mean_sd_empty[!to_avoid_std] <- tmp_values$sd.vector
-        
-        tmp_values$mean.vector <- mean_vector_empty
-        tmp_values$sd.vector <- mean_sd_empty
-        
-      } else{
-        tmp_values <- cocons::getScale(designMatrix$model.matrix)
-        empty_matrix <- tmp_values$std.covs
-      }
-      
+      if(!is.logical(designMatrix$par.pos$mean)){stop("profile ML only available when considering covariates in the trend")}
+
       if(is.logical(designMatrix$par.pos$mean)){
-        x_betas <- getScale(coco.object)$std.covs[, designMatrix$par.pos$mean] # does not match when categorical variables
+        x_betas <- empty_matrix[, designMatrix$par.pos$mean]
       }
       
       tmp_boundaries <- boundaries
@@ -195,7 +144,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       }
       
       parallel::setDefaultCluster(cl = cl)
-      parallel::clusterEvalQ(cl, library("coco"))
+      parallel::clusterEvalQ(cl, library("cocons"))
       
       # factoring out betas
       tmp_par_pos <- designMatrix$par.pos
@@ -225,11 +174,12 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       # if optim.control not provided, then some general Optim.control is provided
       if (is.null(optim.control)) {
-        optim.control <- getOption("coco.Optim.Control")
+        optim.control <- getOption("cocons.Optim.Control")
       } else{
-        optim.control <- .coco.update.optim.control(optim.control)
+        optim.control <- .cocons.update.optim.control(optim.control)
       }
       
+      # Call optim routine
       output_dense <- do.call(what = optimParallel::optimParallel, args = c(
         args_optim,
         optim.control
@@ -238,7 +188,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       parallel::stopCluster(cl)
       
       theta_list <- cocons::getModelLists(theta = output_dense$par, 
-                                         par.pos = args_optim$par.pos, type = 'diff')
+                                         par.pos = args_optim$par.pos, type = "diff")
       
       Sigma_cpp <- cocons::cov_rns(theta = theta_list[-1], locs = args_optim$locs,
                                   x_covariates  =  args_optim$x_covariates,
@@ -260,7 +210,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       coco.object@info$boundaries <- tmp_boundaries
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
-      coco.object@info$optim.type <- 'pmle'
+      coco.object@info$optim.type <- "pmle"
       
       return(coco.object)
       
@@ -270,50 +220,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
   
   if (coco.object@type == "sparse") {
     
-    if(optim.type == 'mle'){
-      
-      designMatrix <- cocons::getDesignMatrix(
-        model.list = coco.object@model.list,
-        data = coco.object@data
-      )
-      
-      if (length(boundaries) == 0) {
-        boundaries <- cocons::getBoundaries(
-          x = coco.object, 
-          lower.value = -3,
-          upper.value = 3
-        )
-      }
-      
-      # Categorical variables
-      # problem here: i can specify categorical values in data but then
-      # not use any in formula
-      if(!is.null(coco.object@info$cat.vars)){
-        
-        to_not_std <- colnames(coco.object@data)[coco.object@info$cat.vars]
-        to_avoid_std <- colnames(designMatrix$model.matrix) %in% to_not_std
-        
-        tmp_values <- cocons::getScale(designMatrix$model.matrix[,!to_avoid_std])
-        
-        empty_matrix <- matrix(0, ncol = dim(designMatrix$model.matrix)[2], 
-                               nrow = dim(designMatrix$model.matrix)[1])
-        
-        empty_matrix[, !to_avoid_std] <- tmp_values$std.covs
-        empty_matrix[, to_avoid_std] <- designMatrix$model.matrix[, to_avoid_std]
-        
-        mean_vector_empty <- rep(0,dim(designMatrix$model.matrix)[2])
-        mean_sd_empty <- rep(1,dim(designMatrix$model.matrix)[2])
-        
-        mean_vector_empty[!to_avoid_std] <- tmp_values$mean.vector
-        mean_sd_empty[!to_avoid_std] <- tmp_values$sd.vector
-        
-        tmp_values$mean.vector <- mean_vector_empty
-        tmp_values$sd.vector <- mean_sd_empty
-        
-      } else{
-        tmp_values <- cocons::getScale(designMatrix$model.matrix)
-        empty_matrix <- tmp_values$std.covs
-      }
+    if(optim.type == "mle"){
       
       # taper
       ref_taper <- coco.object@info$taper(
@@ -323,6 +230,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       print(summary(ref_taper))
       
+      # Suggested by OptimParallel
       if(tolower(.Platform$OS.type) != "windows"){
         cl <- parallel::makeCluster(spec = ncores, type = "FORK", outfile = "",
                                     useXDR = FALSE)
@@ -332,7 +240,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       }
       
       parallel::setDefaultCluster(cl = cl)
-      parallel::clusterEvalQ(cl, library("coco"))
+      parallel::clusterEvalQ(cl, library("cocons"))
       parallel::clusterEvalQ(cl, library("spam"))
       parallel::clusterEvalQ(cl, library("spam64"))
       parallel::clusterEvalQ(cl, options(spam.cholupdatesingular = "error"))
@@ -362,11 +270,12 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       # if optim.control not provided, then some general Optim.control is provided
       if (is.null(optim.control)) {
-        optim.control <- getOption("coco.Optim.Control")
+        optim.control <- getOption("cocons.Optim.Control")
       } else{
-        optim.control <- .coco.update.optim.control(optim.control)
+        optim.control <- .cocons.update.optim.control(optim.control)
       }
       
+      # Call optim routine
       output_taper <- do.call(what = optimParallel::optimParallel, args = c(
         args_optim,
         optim.control
@@ -384,56 +293,15 @@ cocoOptim <- function(coco.object, boundaries = list(),
       coco.object@info$boundaries <- boundaries
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
-      coco.object@info$optim.type <- 'mle'
+      coco.object@info$optim.type <- "mle"
       # Add some warning related to the convergence of the optim routine
       
       return(coco.object)
     }
     
-    if(optim.type == 'pmle'){
+    if(optim.type == "pmle"){
       
-      designMatrix <- cocons::getDesignMatrix(
-        model.list = coco.object@model.list,
-        data = coco.object@data
-      )
-      
-      if (length(boundaries) == 0) {
-        boundaries <- cocons::getBoundaries(
-          x = coco.object, 
-          lower.value = -3,
-          upper.value = 3
-        )
-      }
-      
-      # Categorical variables
-      # problem here: i can specify categorical values in data but then
-      # not use any in formula
-      if(!is.null(coco.object@info$cat.vars)){
-        
-        to_not_std <- colnames(coco.object@data)[coco.object@info$cat.vars]
-        to_avoid_std <- colnames(designMatrix$model.matrix) %in% to_not_std
-        
-        tmp_values <- cocons::getScale(designMatrix$model.matrix[,!to_avoid_std])
-        
-        empty_matrix <- matrix(0, ncol = dim(designMatrix$model.matrix)[2], 
-                               nrow = dim(designMatrix$model.matrix)[1])
-        
-        empty_matrix[, !to_avoid_std] <- tmp_values$std.covs
-        empty_matrix[, to_avoid_std] <- designMatrix$model.matrix[, to_avoid_std]
-        
-        mean_vector_empty <- rep(0,dim(designMatrix$model.matrix)[2])
-        mean_sd_empty <- rep(1,dim(designMatrix$model.matrix)[2])
-        
-        mean_vector_empty[!to_avoid_std] <- tmp_values$mean.vector
-        mean_sd_empty[!to_avoid_std] <- tmp_values$sd.vector
-        
-        tmp_values$mean.vector <- mean_vector_empty
-        tmp_values$sd.vector <- mean_sd_empty
-        
-      } else{
-        tmp_values <- cocons::getScale(designMatrix$model.matrix)
-        empty_matrix <- tmp_values$std.covs
-      }
+      if(dim(coco.object@z)[2] > 1){stop('profile ML routines only handle single realizations.')}
       
       # taper
       ref_taper <- coco.object@info$taper(
@@ -453,7 +321,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       }
       
       parallel::setDefaultCluster(cl = cl)
-      parallel::clusterEvalQ(cl, library("coco"))
+      parallel::clusterEvalQ(cl, library("cocons"))
       parallel::clusterEvalQ(cl, library("spam"))
       parallel::clusterEvalQ(cl, library("spam64"))
       parallel::clusterEvalQ(cl, options(spam.cholupdatesingular = "error"))
@@ -497,11 +365,12 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       # if optim.control not provided, then some general Optim.control is provided
       if (is.null(optim.control)) {
-        optim.control <- getOption("coco.Optim.Control")
+        optim.control <- getOption("cocons.Optim.Control")
       } else{
-        optim.control <- .coco.update.optim.control(optim.control)
+        optim.control <- .cocons.update.optim.control(optim.control)
       }
       
+      # Call optim routine
       output_taper <- do.call(what = optimParallel::optimParallel, args = c(
         args_optim,
         optim.control
@@ -511,7 +380,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       if(T){
         
-        theta_list <- getModelLists(theta = output_taper$par, par.pos = args_optim$par.pos, type = 'diff')
+        theta_list <- getModelLists(theta = output_taper$par, par.pos = args_optim$par.pos, type = "diff")
         
         args_optim$ref_taper@entries <- args_optim$ref_taper@entries * cov_rns_taper_optimized_range(theta = theta_list[-1], 
                                                                                                      locs = args_optim$locs, 
@@ -532,7 +401,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       tmp_global_scale <- output_taper$par[first_scale]
       
       first_par <- log(sigma_0) + tmp_global_scale
-      names(first_par) <- 'std.dev.limits'
+      names(first_par) <- "std.dev.limits"
       second_par <- log(sigma_0) - tmp_global_scale
       
       if(is.logical(args_optim$par.pos$mean)){
@@ -575,7 +444,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       coco.object@info$boundaries <- boundaries_temp
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
-      coco.object@info$optim.type <- 'pmle'
+      coco.object@info$optim.type <- "pmle"
       # Add some warning related to the convergence of the optim routine
       
       return(coco.object)
