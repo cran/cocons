@@ -2,24 +2,24 @@
 % Please edit documentation in R/getFunctions.R
 \name{getScale}
 \alias{getScale}
-\title{Fast and simple standardization for the design matrix}
+\title{Fast and simple standardization for the design matrix.}
 \usage{
 getScale(x, mean.vector = NULL, sd.vector = NULL)
 }
 \arguments{
-\item{x}{a coco object, or a n x p matrix with covariate information to introduce,
+\item{x}{\code{(S4) or (matrix)} a coco object, or a n x p matrix with covariate information to introduce,
 where the first column is a column of ones.}
 
-\item{mean.vector}{if provided, it centers covariates based on this information}
+\item{mean.vector}{\code{(numeric vector)} if provided, it centers covariates based on this information.}
 
-\item{sd.vector}{if provided, it scales covariates based on this information}
+\item{sd.vector}{\code{(numeric vector)} if provided, it scales covariates based on this information.}
 }
 \value{
-a list with a scaled design matrix of dimension n x (p+1), and a set of mean and sd vectors
+(\code{list}) a list with a scaled design matrix of dimension n x (p+1), and a set of mean and sd vectors
 employed to scale the matrix
 }
 \description{
-Centers and scale the design matrix
+Centers and scale the design matrix.
 }
 \author{
 Federico Blasi

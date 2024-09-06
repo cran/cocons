@@ -7,13 +7,13 @@
 getAIC(coco.object)
 }
 \arguments{
-\item{coco.object}{a fitted coco object.}
+\item{coco.object}{\code{(S4)} a fitted coco S4 object.}
 }
 \value{
-a list with the associated AIC value
+(\code{numeric}) the associated AIC value
 }
 \description{
-Retrieve the Akaike information criterion from a fitted coco object
+Retrieve the Akaike information criterion from a fitted coco object.
 }
 \author{
 Federico Blasi

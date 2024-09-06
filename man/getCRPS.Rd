@@ -7,17 +7,20 @@
 getCRPS(z.pred, mean.pred, sd.pred)
 }
 \arguments{
-\item{z.pred}{...}
+\item{z.pred}{\code{(numeric vector)}.}
 
-\item{mean.pred}{...}
+\item{mean.pred}{\code{(numeric vector)}.}
 
-\item{sd.pred}{...}
+\item{sd.pred}{\code{(numeric vector)}.}
 }
 \value{
-retrieves CRPS
+(\code{numeric vector}) retrieves CRPS.
 }
 \description{
-Retrieves the estimated spatial effects of the spatial structure
+Retrieves the Continuous Ranked Probability Score (CRPS) [1].
+}
+\references{
+[1] Gneiting, Tilmann, and Adrian E. Raftery. \emph{"Strictly proper scoring rules, prediction, and estimation."} Journal of the American statistical Association 102.477 (2007): 359-378.
 }
 \author{
 Federico Blasi

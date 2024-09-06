@@ -2,18 +2,18 @@
 % Please edit documentation in R/getFunctions.R
 \name{getTrend}
 \alias{getTrend}
-\title{Computes the trend of the coco object}
+\title{Computes the spatial trend of a (fitted) coco object}
 \usage{
 getTrend(coco.object)
 }
 \arguments{
-\item{coco.object}{a coco class (fitted) object}
+\item{coco.object}{\code{(S4)} a fitted coco S4 object.}
 }
 \value{
-a vector with the adjusted trend
+(\code{numeric vector}) a vector with the adjusted trend.
 }
 \description{
-Compute the trend of the (fitted) coco object
+Compute the trend of the (fitted) coco object.
 }
 \author{
 Federico Blasi

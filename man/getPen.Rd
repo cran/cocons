@@ -7,19 +7,19 @@
 getPen(n, lambda, theta_list, smooth.limits)
 }
 \arguments{
-\item{n}{...}
+\item{n}{\code{(integer)}.}
 
-\item{lambda}{...}
+\item{lambda}{\code{(numeric)}.}
 
-\item{theta_list}{...}
+\item{theta_list}{\code{(list)}.}
 
-\item{smooth.limits}{...}
+\item{smooth.limits}{\code{(numeric vector)}.}
 }
 \value{
-retrieves penalization term
+(\code{numeric}) retrieves penalization term.
 }
 \description{
-Returns the penalization term
+Returns the penalization term.
 }
 \author{
 Federico Blasi

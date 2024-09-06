@@ -2,23 +2,23 @@
 % Please edit documentation in R/getFunctions.R
 \name{getCovMatrix}
 \alias{getCovMatrix}
-\title{Covariance matrix from a fitted coco object}
+\title{Covariance matrix for "coco" class}
 \usage{
 getCovMatrix(coco.object, type = 'global', index = NULL)
 }
 \arguments{
-\item{coco.object}{a coco class (fitted) object}
+\item{coco.object}{\code{(S4)} a fitted \code{\link[=coco]{coco()}} object.}
 
-\item{type}{whether 'global' to retrieve the regular covariance matrix, or 'local' to retrieve global covariance
-based on the local aspect of a specific location (not implemented yet)}
+\item{type}{\code{(character)} whether \code{'global'} to retrieve the regular covariance matrix, or \code{'local'} to retrieve global covariance.
+based on the local aspects of a specific location (not implemented yet).}
 
-\item{index}{index to perform local covariance matrix (not implemented yet)}
+\item{index}{\code{(integer)} index to perform local covariance matrix (not implemented yet).}
 }
 \value{
-a vector with the adjusted trend
+(\code{matrix}) a n x n covariance matrix.
 }
 \description{
-Retrieves the associated covariance matrix from a fitted coco object
+Compute the covariance matrix of \code{coco.object}.
 }
 \author{
 Federico Blasi

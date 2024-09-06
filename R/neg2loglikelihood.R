@@ -4,16 +4,16 @@
 #' 
 #' @usage GetNeg2loglikelihoodTaper(theta, par.pos, ref_taper, locs, 
 #' x_covariates, smooth.limits, cholS, z, n, lambda)
-#' @param theta a vector with parameters values
-#' @param par.pos par.pos list
-#' @param ref_taper spam object based on a taper based covariance function
-#' @param locs spatial location matrix
-#' @param x_covariates design matrix
-#' @param smooth.limits smooth.limits
-#' @param cholS Cholesky object from spam
-#' @param z a vector of observed values
-#' @param n dim(z)\[1\]
-#' @param lambda regularization parameter
+#' @param theta \code{(numeric vector)} a vector with parameters values.
+#' @param par.pos \code{(list)} par.pos list from \link{getDesignMatrix}.
+#' @param ref_taper \code{(S4)} spam object based on a compact-supported covariance function.
+#' @param locs \code{(matrix)} spatial location matrix.
+#' @param x_covariates \code{(data.frame)} design matrix.
+#' @param smooth.limits \code{(numeric vector)} smooth.limits.
+#' @param cholS \code{(S4)} Cholesky object from spam.
+#' @param z \code{(numeric vector)} a vector of observed values.
+#' @param n \code{(numeric)} dim(z)\[1\].
+#' @param lambda \code{(numeric)} regularization parameter.
 #' @returns value 
 #' @author Federico Blasi
 GetNeg2loglikelihoodTaper <- function(theta, par.pos, ref_taper, locs,
@@ -22,7 +22,7 @@ GetNeg2loglikelihoodTaper <- function(theta, par.pos, ref_taper, locs,
   
   theta_list <- getModelLists(theta = theta, par.pos = par.pos, type = "diff")
   
-  ref_taper@entries <- ref_taper@entries * cov_rns_taper_optimized_range(theta = theta_list[-1], 
+  ref_taper@entries <- ref_taper@entries * cov_rns_taper(theta = theta_list[-1], 
                                                                          locs = locs, 
                                                                          x_covariates =  x_covariates, 
                                                                          colindices = ref_taper@colindices, 
@@ -52,16 +52,16 @@ GetNeg2loglikelihoodTaper <- function(theta, par.pos, ref_taper, locs,
 #' 
 #' @usage GetNeg2loglikelihoodTaperProfile(theta, par.pos, ref_taper, 
 #' locs, x_covariates, smooth.limits, cholS, z, n, lambda)
-#' @param theta a vector with parameters values
-#' @param par.pos par.pos list
-#' @param ref_taper spam object based on a taper based covariance function
-#' @param locs spatial location matrix
-#' @param x_covariates design matrix
-#' @param smooth.limits smooth.limits
-#' @param cholS Cholesky object from spam
-#' @param z a vector of observed values
-#' @param n dim(z)\[1\]
-#' @param lambda regularization parameter
+#' @param theta \code{(numeric vector)} a vector with parameters values.
+#' @param par.pos \code{(list)} par.pos list.
+#' @param ref_taper \code{(S4)} spam object based on a taper based covariance function.
+#' @param locs \code{(matrix)} spatial location matrix.
+#' @param x_covariates \code{(data.frame)} design matrix.
+#' @param smooth.limits \code{(numeric vector)} smooth.limits.
+#' @param cholS \code{(S4)} Cholesky object from spam.
+#' @param z \code{(numeric vector)} a vector of observed values.
+#' @param n \code{(integer)} dim(z)\[1\].
+#' @param lambda \code{(numeric)} regularization parameter.
 #' @returns value 
 #' @author Federico Blasi
 GetNeg2loglikelihoodTaperProfile <- function(theta, par.pos, ref_taper, locs,
@@ -72,7 +72,7 @@ GetNeg2loglikelihoodTaperProfile <- function(theta, par.pos, ref_taper, locs,
   
   theta_list$std.dev[1] <- 0
   
-  ref_taper@entries <- ref_taper@entries * cov_rns_taper_optimized_range(theta = theta_list[-1], 
+  ref_taper@entries <- ref_taper@entries * cov_rns_taper(theta = theta_list[-1], 
                                                                          locs = locs, 
                                                                          x_covariates =  x_covariates, 
                                                                          colindices = ref_taper@colindices, 
@@ -94,15 +94,15 @@ GetNeg2loglikelihoodTaperProfile <- function(theta, par.pos, ref_taper, locs,
 #'
 #' @usage GetNeg2loglikelihoodProfile(theta, par.pos, locs, x_covariates, 
 #' smooth.limits, z, n, x_betas,lambda)
-#' @param theta a vector with parameters values
-#' @param par.pos par.pos list
-#' @param locs spatial location matrix
-#' @param x_covariates design matrix
-#' @param smooth.limits smooth.limits
-#' @param z a vector of observed values
-#' @param n dim(z)\[1\]
-#' @param x_betas design matrix for the trend
-#' @param lambda regularization parameter
+#' @param theta \code{(numeric vector)} a vector with parameters values.
+#' @param par.pos \code{(list)} par.pos list.
+#' @param locs \code{(matrix)} spatial location matrix.
+#' @param x_covariates \code{(data.frame)} design matrix.
+#' @param smooth.limits \code{(numeric vector)} smooth.limits.
+#' @param z \code{(numeric vector)} a vector of observed values.
+#' @param n \code{(integer)} dim(z)\[1\].
+#' @param x_betas \code{(matrix) or (data.frame)} design matrix for the trend.
+#' @param lambda \code{(numeric)} regularization parameter.
 #' @returns value 
 #' @author Federico Blasi
 GetNeg2loglikelihoodProfile <- function(theta, par.pos, locs, x_covariates, 
@@ -139,14 +139,14 @@ GetNeg2loglikelihoodProfile <- function(theta, par.pos, locs, x_covariates,
 #'
 #' @usage GetNeg2loglikelihood(theta, par.pos, locs, x_covariates, 
 #' smooth.limits, z, n, lambda)
-#' @param theta a vector with parameters values
-#' @param par.pos par.pos list
-#' @param locs spatial location matrix
-#' @param x_covariates design matrix
-#' @param smooth.limits smooth.limits
-#' @param z a vector of observed values
-#' @param n dim(z)\[1\]
-#' @param lambda regularization parameter
+#' @param theta \code{(numeric vector)} a vector with parameters values.
+#' @param par.pos \code{(list)} par.pos list.
+#' @param locs \code{(matrix)} spatial location matrix.
+#' @param x_covariates \code{(data.frame)} design matrix.
+#' @param smooth.limits \code{(numeric vector)} smooth.limits.
+#' @param z \code{(numeric vector)} a vector of observed values.
+#' @param n \code{(integer)} dim(z)\[1\].
+#' @param lambda \code{(numeric)} regularization parameter.
 #' @returns value
 #' @author Federico Blasi
 GetNeg2loglikelihood <- function(theta, 
@@ -160,8 +160,10 @@ GetNeg2loglikelihood <- function(theta,
   
   theta_list <- cocons::getModelLists(theta = theta, par.pos = par.pos, type = "diff")
   
-  Sigma_cpp <- cocons::cov_rns(theta = theta_list[-1], locs = locs, x_covariates =  x_covariates,
-                              smooth_limits = smooth.limits)
+  Sigma_cpp <- cocons::cov_rns(theta = theta_list[-1], 
+                               locs = locs, 
+                               x_covariates =  x_covariates,
+                               smooth_limits = smooth.limits)
   
   check_pd <- tryCatch(cholS <- base::chol(Sigma_cpp), error = function(e) e)
   if (inherits(check_pd, "error")) {

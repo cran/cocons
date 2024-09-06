@@ -2,18 +2,18 @@
 % Please edit documentation in R/getFunctions.R
 \name{getCondNumber}
 \alias{getCondNumber}
-\title{Computes the condition number of the associated correlation matrix of the fitted coco object}
+\title{Condition number for (fitted) coco objects}
 \usage{
 getCondNumber(coco.object)
 }
 \arguments{
-\item{coco.object}{a coco class (fitted) object}
+\item{coco.object}{\code{(S4)} a fitted coco S4 object.}
 }
 \value{
-the condition number
+(\code{numeric}) the condition number.
 }
 \description{
-Compute the trend of the (fitted) coco object
+Computes the condition number of the associated correlation matrix of the fitted coco object.
 }
 \author{
 Federico Blasi

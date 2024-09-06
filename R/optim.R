@@ -1,28 +1,57 @@
 
-#' Optimizer for object class coco
-#' @description Optimizer based on multi-thread Optimparallel L-BFGS-B optimizers.
+#' Optimizer of nonstationary spatial models
+#' @description Estimation of the spatial model parameters based on the L-BFGS-B optimizer \[1\]. 
 #' @details
-#'  Current implementations only allow single realizations for 'pmle' optim.type. 
+#' Current implementation only allows a single realization for \code{"pmle"} \code{optim.type}. 
 #' @usage cocoOptim(coco.object, boundaries = list(), 
 #' ncores = parallel::detectCores(), optim.control, optim.type)
-#' @param coco.object a coco object. See ?coco()
-#' @param boundaries if provided, a list with lower, init, and upper values. 
-#' if not is computed based on generic fast_init_boundaries()
-#' @param ncores number of cores to be used for the optimization routine.
-#' @param optim.control list with settings to be passed to the optimparallel function
-#' @param optim.type Optimization approach: whether 'mle' for classical Maximum Likelihood approach, 
-#' or 'pmle' to factor out the spatial trend (when handling 'dense' coco objects), or
-#' to factor out the global marginal standard deviation parameter (when considering 'sparse' coco objects)
-#' @returns a fitted coco object
+#' @param coco.object (\code{S4}) a \link{coco} object.
+#' @param boundaries (\code{list}) if provided, a list with lower, init, and upper values, as the one provided by \link{getBoundaries}. Otherwise,
+#' it is computed based on \link{getBoundaries} with global lower and upper values -2 and 2.
+#' @param ncores (\code{integer}) number of threads for the optimization routine.
+#' @param optim.control (\code{list}) list with settings to be passed to the optimParallel function \[2\].
+#' @param optim.type (\code{character}) Optimization approach: whether \code{"mle"} for classical Maximum Likelihood approach, 
+#' or \code{"pmle"} to factor out the spatial trend (when handling \code{"dense"} coco objects), or
+#' to factor out the global marginal standard deviation parameter (when considering \code{"sparse"} coco objects).
+#' @returns (\code{S4}) An optimized S4 object of class \code{coco}.
 #' @author Federico Blasi
+#' @seealso [\link[optimParallel]{optimParallel}]
+#' @references 
+#' \[1\] Byrd, Richard H., et al. \emph{"A limited memory algorithm for bound constrained optimization."} 
+#' SIAM Journal on scientific computing 16.5 (1995): 1190-1208.
+#' 
+#' \[2\] Gerber, Florian, and Reinhard Furrer. \emph{"optimParallel: An R package providing a parallel version of the L-BFGS-B optimization method."} 
+#' R Journal 11.1 (2019): 352-358.
+#' @examples
+#' \dontrun{
+#' model.list <- list('mean' = 0,
+#'                    'std.dev' = formula( ~ 1 + cov_x + cov_y),
+#'                    'scale' = formula( ~ 1 + cov_x + cov_y),
+#'                    'aniso' = 0,
+#'                    'tilt' = 0,
+#'                    'smooth' = 3/2,
+#'                    'nugget' = -Inf)
+#'                    
+#' coco_object <- coco(type = 'dense',
+#'                     data = holes[[1]][1:100,],
+#'                     locs = as.matrix(holes[[1]][1:100,1:2]),
+#'                     z = holes[[1]][1:100,]$z,
+#'                     model.list = model.list)
+#'                     
+#' optim_coco <- cocoOptim(coco_object,
+#' boundaries = getBoundaries(coco_object,
+#' lower.value = -3, 3))
+#' 
+#' plot(optim_coco)
+#' 
+#' print(optim_coco)
+#' 
+#' getEstims(optim_coco)
+#' }
 #' 
 cocoOptim <- function(coco.object, boundaries = list(), 
                        ncores = parallel::detectCores(), 
                        optim.control = NULL, optim.type = "mle"){
-  
-  if(length(boundaries) > 0){
-    .cocons.check.boundaries(boundaries)
-  }
   
   .cocons.check.ncores(ncores)
   
@@ -34,12 +63,13 @@ cocoOptim <- function(coco.object, boundaries = list(),
       data = coco.object@data
     )
     
-    if (length(boundaries) == 0) {
+    if(length(boundaries) == 0){
       boundaries <- cocons::getBoundaries(
         x = coco.object, 
         lower.value = -2,
-        upper.value = 2
-      )
+        upper.value = 2)
+    } else{
+      .cocons.check.boundaries(coco.object, boundaries)
     }
     
     # Categorical variables
@@ -76,7 +106,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
         "par" = boundaries$theta_init,
         "upper" = boundaries$theta_upper,
         "n" = dim(coco.object@z)[1],
-        "smooth.limits" = coco.object@info$smooth_limits,
+        "smooth.limits" = coco.object@info$smooth.limits,
         "z" = coco.object@z,
         "x_covariates" = empty_matrix,
         "par.pos" = designMatrix$par.pos,
@@ -101,13 +131,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       parallel::stopCluster(cl)
       
-      if (any(boundaries$theta_upper == output_dense$par) ||
-          any(boundaries$theta_lower == output_dense$par)) {
-        warning("at least one of the estimates at the 
-              boundaries.")
-      }
-      
-      # Add some warning related to the convergence of the optim routine
+      .cocons.check.convergence(output_dense, boundaries)
       
       coco.object@output <- output_dense
       coco.object@info$boundaries <- boundaries
@@ -123,7 +147,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       if(dim(coco.object@z)[2] > 1){stop('profile ML routines only handle single realizations.')}
       
-      if(!is.logical(designMatrix$par.pos$mean)){stop("profile ML only available when considering covariates in the trend")}
+      if(!is.logical(designMatrix$par.pos$mean)){stop("profile ML only available when considering covariates in the mean.")}
 
       if(is.logical(designMatrix$par.pos$mean)){
         x_betas <- empty_matrix[, designMatrix$par.pos$mean]
@@ -161,7 +185,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
         "par" = boundaries$theta_init,
         "upper" = boundaries$theta_upper,
         "n" = length(coco.object@z),
-        "smooth.limits" = coco.object@info$smooth_limits,
+        "smooth.limits" = coco.object@info$smooth.limits,
         "z" = coco.object@z,
         "x_covariates" = empty_matrix,
         "par.pos" = tmp_par_pos,
@@ -198,13 +222,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       betass <- solve(t(args_optim$x_betas) %*% Sigma_X) %*% t(Sigma_X) %*% args_optim$z
       output_dense$par <- c(betass, output_dense$par)
       
-      if (any(tmp_boundaries$theta_upper == output_dense$par, na.rm = T) ||
-          any(tmp_boundaries$theta_lower == output_dense$par, na.rm = T)) {
-        warning("at least one of the estimates at the 
-              boundaries.")
-      }
-      
-      # Add some warning related to the convergence of the optim routine
+      .cocons.check.convergence(output_dense, tmp_boundaries)
       
       coco.object@output <- output_dense
       coco.object@info$boundaries <- tmp_boundaries
@@ -244,9 +262,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       parallel::clusterEvalQ(cl, library("spam"))
       parallel::clusterEvalQ(cl, library("spam64"))
       parallel::clusterEvalQ(cl, options(spam.cholupdatesingular = "error"))
-      parallel::clusterEvalQ(cl, options(spam.cholsymmetrycheck = FALSE)) # check whether i want to add this
-      
-      # options(spam.cholsymmetrycheck = FALSE)
+      parallel::clusterEvalQ(cl, options(spam.cholsymmetrycheck = FALSE))
       
       args_optim <- list(
         "fn" = cocons::GetNeg2loglikelihoodTaper,
@@ -258,7 +274,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
         "ref_taper" = ref_taper,
         "locs" = coco.object@locs,
         "x_covariates" = empty_matrix,
-        "smooth.limits" = coco.object@info$smooth_limits,
+        "smooth.limits" = coco.object@info$smooth.limits,
         "cholS" = spam::chol.spam(ref_taper),
         "z" = coco.object@z,
         "n" = length(coco.object@z),
@@ -283,19 +299,14 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       parallel::stopCluster(cl)
       
-      if (any(boundaries$theta_upper == output_taper$par) ||
-          any(boundaries$theta_lower == output_taper$par)) {
-        warning("at least one of the estimates at the 
-              boundaries.")
-      }
+      .cocons.check.convergence(output_taper, boundaries)
       
       coco.object@output <- output_taper
       coco.object@info$boundaries <- boundaries
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
       coco.object@info$optim.type <- "mle"
-      # Add some warning related to the convergence of the optim routine
-      
+
       return(coco.object)
     }
     
@@ -325,7 +336,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       parallel::clusterEvalQ(cl, library("spam"))
       parallel::clusterEvalQ(cl, library("spam64"))
       parallel::clusterEvalQ(cl, options(spam.cholupdatesingular = "error"))
-      parallel::clusterEvalQ(cl, options(spam.cholsymmetrycheck = FALSE)) # check whether i want to add this
+      parallel::clusterEvalQ(cl, options(spam.cholsymmetrycheck = FALSE))
       
       # options(spam.cholsymmetrycheck = FALSE)
       
@@ -353,7 +364,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
         "ref_taper" = ref_taper,
         "locs" = coco.object@locs,
         "x_covariates" = empty_matrix,
-        "smooth.limits" = coco.object@info$smooth_limits,
+        "smooth.limits" = coco.object@info$smooth.limits,
         "cholS" = spam::chol.spam(ref_taper),
         "z" = coco.object@z,
         "n" = length(coco.object@z),
@@ -382,7 +393,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
         
         theta_list <- getModelLists(theta = output_taper$par, par.pos = args_optim$par.pos, type = "diff")
         
-        args_optim$ref_taper@entries <- args_optim$ref_taper@entries * cov_rns_taper_optimized_range(theta = theta_list[-1], 
+        args_optim$ref_taper@entries <- args_optim$ref_taper@entries * cov_rns_taper(theta = theta_list[-1], 
                                                                                                      locs = args_optim$locs, 
                                                                                                      x_covariates =  args_optim$x_covariates, 
                                                                                                      colindices = args_optim$ref_taper@colindices, 
@@ -433,20 +444,15 @@ cocoOptim <- function(coco.object, boundaries = list(),
       output_taper$par <- new_pars
       
       # fix names output_taper
-      
-      if (any(boundaries_temp$theta_upper == output_taper$par, na.rm = T) ||
-          any(boundaries_temp$theta_lower == output_taper$par, na.rm = T)) {
-        warning("at least one of the estimates at the 
-              boundaries.")
-      }
+
+      .cocons.check.convergence(output_taper, boundaries_temp)
       
       coco.object@output <- output_taper
       coco.object@info$boundaries <- boundaries_temp
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
       coco.object@info$optim.type <- "pmle"
-      # Add some warning related to the convergence of the optim routine
-      
+
       return(coco.object)
     }
     
