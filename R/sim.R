@@ -1,26 +1,28 @@
 
-#' Marginal and conditional simulation of nonstationary Gaussian process
-#' @description draw realizations of nonstationary Gaussian processes with covariate-based covariance functions.
-#' @details \code{'cond'} sim.type requires specifying in \code{'cond.info'} a list with \code{'newdataset'} a data.frame containing covariates present in model.list at simulation locations, 
-#' and \code{'newlocs'} a matrix with locations related to the simulation locations, matching indexing of \code{'newdataset'}. 
+#' Marginal and conditional simulation of nonstationary Gaussian processes
+#' @description draw realizations of stationary and nonstationary Gaussian processes with covariate-based covariance functions.
+#' @details 
+#' #' The argument \code{sim.type = 'cond'} specifies a conditional simulation, requiring \code{cond.info} to be provided. 
+#' \code{cond.info} is a list including \code{newdataset}, a data.frame containing covariates present in \code{model.list} at the simulation locations, and \code{newlocs}, 
+#' a matrix specifying the locations corresponding to the simulation, with indexing that matches \code{newdataset}.
 #' 
-#' \code{type = 'classic'} assumes a simpler parameterization for the covariance function, assuming log-parameterizations for \code{'std.dev'}, \code{'scale'}, and \code{'smooth'}.
+#' The argument \code{type = 'classic'} assumes a simplified parameterization for the covariance function, with log-parameterizations applied to the parameters \code{std.dev}, 
+#' \code{scale}, and \code{smooth}. 
 #' 
 #' @usage cocoSim(coco.object, pars, n, seed, standardize, 
 #' type = 'classic', sim.type = NULL, cond.info = NULL)
-#' @param coco.object (\code{S4}) a \link{coco} object.
-#' @param pars (\code{numeric vector}) a vector of parameters values related to \code{model.list}.
-#' @param n (\code{integer}) number of realizations to simulate.
-#' @param seed (\code{integer or NULL}) seed number. default set to NULL.
-#' @param standardize (\code{TRUE/FALSE}) logical argument describing whether provided covariates 
-#' should be standardize (TRUE) or not (FALSE). By default set to TRUE.
-#' @param type (\code{character}) whether parameters are related to a classical parameterization ('classic') or
-#' a difference parameterization \code{'diff'}. Default set to \code{'classic'}. For \code{'sparse'} coco objects, only \code{'diff'} is available.
-#' @param sim.type (\code{character}) if set \code{'cond'} then a conditional simulation takes place.
-#' @param cond.info (\code{list}) a list containing added information to perform conditional simulation.
-#' @returns (\code{matrix}) a matrix n x dim(data)\[1\].
+#' @param coco.object (\code{S4}) A \link{coco} object.
+#' @param pars (\code{numeric vector} or NULL) A vector of parameter values associated with \code{model.list}. 
+#' If coco.object is a fitted object, and pars is \code{NULL}, it get pars from coco.object\@output$pars (and also sets 'type' to 'diff').
+#' @param n (\code{integer}) Number of realizations to simulate.
+#' @param seed (\code{integer or NULL}) Seed for random number generation. Defaults to NULL.
+#' @param standardize (\code{logical}) Indicates whether the provided covariates should be standardized (\code{TRUE}) or not (\code{FALSE}). Defaults to \code{TRUE}.
+#' @param type (\code{character}) Specifies whether the parameters follow a classical parameterization (\code{'classic'}) or a difference parameterization (\code{'diff'}). Defaults to \code{'classic'}. For sparse \code{coco} objects, only \code{'diff'} is allowed.
+#' @param sim.type (\code{character}) If set to \code{'cond'}, a conditional simulation is performed.
+#' @param cond.info (\code{list}) A list containing additional information required for conditional simulation.
+#' @returns (\code{matrix}) a matrix dim(data)\[1\] x n.
 #' @author Federico Blasi
-#' @seealso [coco()]
+#' @seealso \link{coco}
 #' @examples
 #' \dontrun{
 #' 
@@ -48,7 +50,7 @@
 #' }
 #' 
 cocoSim <- function(coco.object, 
-                     pars,
+                     pars = NULL,
                      n = 1,
                      seed = NULL, 
                      standardize = TRUE, 
@@ -56,9 +58,13 @@ cocoSim <- function(coco.object,
                      sim.type = NULL,
                      cond.info = NULL){
   
-  # add a check to test whether length of pars match model specification
-  
+  .cocons.check.pars(coco.object,pars)
   .cocons.check.type(coco.object@type)
+  
+  if(is.null(pars)){
+    pars <- coco.object@output$par
+    type <- "diff"
+  }
   
   if(coco.object@type == "dense"){
     
@@ -95,11 +101,14 @@ cocoSim <- function(coco.object,
                                        x_covariates = std_pred,
                                        smooth_limits = coco.object@info$smooth.limits)
         
-        part_b <- covmat_pred %*% solve(covmat) %*% t(covmat_pred)
         
-        conditional_covariance <-  covmat_unobs - part_b
         
-        L <- chol(conditional_covariance)
+        L <- base::chol(covmat_unobs - covmat_pred %*% solve(covmat, t(covmat_pred)) + 
+                          .cocons.getDelta(dim(covmat_unobs)[1], sigma = sqrt(exp(to_pass$std.dev[1]))) * diag(dim(covmat_unobs)[1])) # 
+        
+        if(exists("seed")){
+          set.seed(seed)
+        }
         
         iiderrors <- replicate(n, expr = stats::rnorm(dim(cond.info$newlocs)[1], mean = 0, sd = 1))
         
@@ -110,7 +119,7 @@ cocoSim <- function(coco.object,
         
         tmp_mu <- step_one$trend + step_one$mean
         
-        return(sweep(t(iiderrors) %*% L, 2, tmp_mu, "+"))
+        return(t(sweep(t(iiderrors) %*% L, 2, tmp_mu, "+")))
         
       } 
     } else{
@@ -130,13 +139,13 @@ cocoSim <- function(coco.object,
                                            par.pos = coco_items$par.pos, 
                                            type = type)
       
-      if(type == "classic"){
+      if(!is.formula(coco.object@model.list$smooth)){
         
-        if(!is.formula(coco.object@model.list$smooth)){
-          
-          theta_to_fit$smooth[1] <- log(coco.object@info$smooth.limits[1])
-          
-        }
+        theta_to_fit$smooth[1] <- log(coco.object@info$smooth.limits[1])
+        
+      }
+      
+      if(type == "classic"){
         
         covmat <- cocons::cov_rns_classic(theta = theta_to_fit[-1], 
                                          locs = coco.object@locs,
@@ -161,7 +170,7 @@ cocoSim <- function(coco.object,
       
       tmp_mu <- std_coco$std.covs %*% theta_to_fit$mean
       
-      return(sweep(t(iiderrors) %*% cholS, 2, tmp_mu, "+"))
+      return(t(sweep(t(iiderrors) %*% cholS, 2, tmp_mu, "+")))
       
     }
   } 
@@ -205,7 +214,7 @@ cocoSim <- function(coco.object,
     
     tmp_mu <- std_coco$std.covs %*% theta_to_fit$mean
     
-    return(sweep(as.matrix(t(iiderrors) %*% cholS)[,iord, drop = F], 2, tmp_mu, "+"))
+    return(t(sweep(as.matrix(t(iiderrors) %*% cholS)[,iord, drop = F], 2, tmp_mu, "+")))
     
   }
   

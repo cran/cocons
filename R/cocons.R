@@ -26,11 +26,11 @@
 #' \eqn{\nu_{l}}, and \eqn{\nu_{u}} are the lower and upper bounds limiting the range of variation of the spatially-varying smoothness, and where \eqn{\boldsymbol{X}_{\ell}} relates to a specific design matrix defined by the specific models for each of the source of nonstationarity.
 #' 
 #' Lastly, arguments for the \code{"info"} list argument involve: \itemize{
-#' \item \code{"lambda"}: (\code{numeric}) a positive scalar specifying the regularization parameter.
-#' \item \code{"smooth.limits"}: (\code{numeric vector}) specifying the allowed range of variation for the spatially varying smoothness.
+#' \item \code{"lambda"}: (\code{numeric}) a positive scalar specifying the regularization parameter. Larger values penalizes highly-smoothed long-tailed covariance functions. 
+#' \item \code{"smooth.limits"}: (\code{numeric vector}) specifying the range of variation for the spatially varying smoothness (e.g. c(0.5, 2.5)).
 #' \item \code{"taper"}: (\code{numeric}) specifying the desired taper function from the spam package (only for "sparse" coco objects).
 #' \item \code{"delta"}: (\code{numeric}) specifying the taper range/scale (only for "sparse" coco objects).
-#' \item \code{"cat.vars"}: (\code{integer vector}) index of those variables in \code{data} that should not be scaled during the optimization (e.g., categorical).
+#' \item \code{"skip.scale"}: (\code{integer vector}) By default, all covariates are scaled. \code{skip.scale} allows to specify the index of those variables in \code{data} that should not be scaled during the optimization.
 #' }
 #' 
 #' @usage coco(type, data, locs, z, model.list, info, output = list())
@@ -94,13 +94,41 @@ coco <- function(type,
     z <- matrix(z, ncol = 1)
   }
   
-  .cocons.check.z(z)
+
+  
+  .cocons.check.z(z, data)
   
   .cocons.check.model.list(model.list,
                           data)
+  
+  #
+  
+  if(is.null(model.list$mean)){
+    model.list$mean <- 0
+  }
+  
+  if(is.null(model.list$aniso)){
+    model.list$aniso <- 0
+  }
+  
+  if(is.null(model.list$tilt)){
+    model.list$tilt <- 0
+  }
+  
+  if(is.null(model.list$smooth)){
+    model.list$smooth <- 0.5
+  }
+  
+  if(is.null(model.list$nugget)){
+    model.list$nugget <- -Inf
+  }
+  
+  model.list <- model.list[c("mean", "std.dev", "scale", "aniso", "tilt", "smooth", "nugget")]
+  
   .cocons.check.info(type = type, 
                     info = info,
-                    model.list = model.list)
+                    model.list = model.list,
+                    data = data)
   
   .cocons.check.output(output)
   
