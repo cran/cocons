@@ -2,7 +2,7 @@
 #' Marginal and conditional simulation of nonstationary Gaussian processes
 #' @description draw realizations of stationary and nonstationary Gaussian processes with covariate-based covariance functions.
 #' @details 
-#' #' The argument \code{sim.type = 'cond'} specifies a conditional simulation, requiring \code{cond.info} to be provided. 
+#' The argument \code{sim.type = 'cond'} specifies a conditional simulation, requiring \code{cond.info} to be provided. 
 #' \code{cond.info} is a list including \code{newdataset}, a data.frame containing covariates present in \code{model.list} at the simulation locations, and \code{newlocs}, 
 #' a matrix specifying the locations corresponding to the simulation, with indexing that matches \code{newdataset}.
 #' 
@@ -103,8 +103,7 @@ cocoSim <- function(coco.object,
         
         
         
-        L <- base::chol(covmat_unobs - covmat_pred %*% solve(covmat, t(covmat_pred)) + 
-                          .cocons.getDelta(dim(covmat_unobs)[1], sigma = sqrt(exp(to_pass$std.dev[1]))) * diag(dim(covmat_unobs)[1])) # 
+        L <- base::chol(covmat_unobs - covmat_pred %*% solve(covmat, t(covmat_pred))) 
         
         if(exists("seed")){
           set.seed(seed)
@@ -117,7 +116,7 @@ cocoSim <- function(coco.object,
                                         newlocs = as.matrix(cond.info$newlocs), 
                                         type = "mean")
         
-        tmp_mu <- step_one$trend + step_one$mean
+        tmp_mu <- step_one$systematic + step_one$stochastic
         
         return(t(sweep(t(iiderrors) %*% L, 2, tmp_mu, "+")))
         

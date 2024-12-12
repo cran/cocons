@@ -1,23 +1,22 @@
 
-#' Optimizer for Nonstationary Spatial Models
+#' Optimizer for coco objects
 #' 
 #' @description 
-#' This function estimates the spatial model parameters using the L-BFGS-B optimizer \[1\].
-#' 
+#' Estimation the spatial model parameters using the L-BFGS-B optimizer \[1\].
 #' 
 #' @usage 
-#' cocoOptim(coco.object, boundaries = list(), ncores = "auto", 
-#' optim.type, safe, optim.control)
+#' cocoOptim(coco.object, boundaries = list(), ncores = "auto", safe = TRUE,
+#' optim.type, optim.control)
 #' 
 #' @param coco.object (\code{S4}) A \link{coco} object.
 #' @param boundaries (\code{list}) If provided, a list containing lower, initial, and upper values for the parameters, as defined by \link{getBoundaries}. If not provided, these values are automatically computed with global lower and upper bounds set to -2 and 2.
 #' @param ncores (\code{character} or \code{integer}) The number of threads to use for the optimization. If set to `"auto"`, the number of threads is chosen based on system capabilities or a fraction of the available cores.
 #' @param optim.type (\code{character}) The optimization approach. Options include:
-#' \itemize{
-#'   \item \code{"mle"}: Classical Maximum Likelihood estimation.
-#'   \item \code{"pmle"}: Profile Maximum Likelihood, factoring out the spatial trend for dense objects or the global marginal variance parameter for sparse objects.
-#' }
 #' @param safe (\code{logical}) If `TRUE`, the function avoids Cholesky decomposition errors due to ill-posed covariance matrices by returning a pre-defined large value. Defaults to `TRUE`.
+#' \itemize{
+#'   \item \code{"ml"}: Classical Maximum Likelihood estimation.
+#'   \item \code{"pml"}: Profile Maximum Likelihood, factoring out the spatial trend for dense objects or the global marginal variance parameter for sparse objects.
+#' }
 #' @param optim.control (\code{list}) A list of settings to be passed to the \link[optimParallel]{optimParallel} function \[2\].
 #' @returns (\code{S4}) An optimized S4 object of class \code{coco}.
 #' @author Federico Blasi
@@ -63,12 +62,19 @@
 #' }
 #' 
 cocoOptim <- function(coco.object, boundaries = list(), 
-                      ncores = "auto", optim.type = "mle",
-                      safe = TRUE,
+                      ncores = "auto", safe = TRUE,
+                      optim.type = "ml",
                       optim.control = NULL){
   
   # Init objects
   if(T){
+    
+    # if optim.control not provided, then some general Optim.control is provided
+    optim.control <- if (is.null(optim.control)) {
+      getOption("cocons.Optim.Control")
+    } else {
+      .cocons.update.optim.control(optim.control)
+    }
     
     if(is.character(ncores)){
       ncores <- .cocons.set.ncores(coco.object, optim.control)
@@ -104,12 +110,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       mod_DM <- tmp_values$std.covs      
     }
     
-    # if optim.control not provided, then some general Optim.control is provided
-    optim.control <- if (is.null(optim.control)) {
-      getOption("cocons.Optim.Control")
-    } else {
-      .cocons.update.optim.control(optim.control)
-    }
+    optim.type <- tolower(optim.type)
     
     # Suggested by OptimParallel
     if(tolower(.Platform$OS.type) != "windows"){
@@ -124,7 +125,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
   
   if (coco.object@type == "dense") {
     
-    if(optim.type == "mle"){
+    if(optim.type == "ml"){
 
       parallel::setDefaultCluster(cl = cl)
       parallel::clusterEvalQ(cl, library("cocons"))
@@ -159,7 +160,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       coco.object@info$boundaries <- boundaries
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
-      coco.object@info$optim.type <- "mle"
+      coco.object@info$optim.type <- "ml"
       coco.object@info$safe <- safe
       coco.object@info$call <- match.call()
       
@@ -167,9 +168,9 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
     }
     
-    if(optim.type == "pmle"){
+    if(optim.type == "pml" || optim.type == "reml"){
       
-      if(!is.logical(designMatrix$par.pos$mean)){stop("profile ML only available when considering covariates in the mean.")}
+      if(!is.logical(designMatrix$par.pos$mean)){stop("Profile ML or Restricted ML only available when considering covariates in the mean.")}
 
       x_betas <- mod_DM[, designMatrix$par.pos$mean]
       
@@ -190,14 +191,18 @@ cocoOptim <- function(coco.object, boundaries = list(),
       }
 
       args_optim <- list(
-        "fn" = cocons::GetNeg2loglikelihoodProfile,
+        "fn" = switch(optim.type,
+                      pml = cocons::GetNeg2loglikelihoodProfile,
+                      reml = cocons::GetNeg2loglikelihoodREML),
         "method" = "L-BFGS-B",
         "lower" = boundaries$theta_lower,
         "par" = boundaries$theta_init,
         "upper" = boundaries$theta_upper,
         "n" = dim(coco.object@z)[1],
         "smooth.limits" = coco.object@info$smooth.limits,
-        "z" = coco.object@z,
+        "z" = switch(optim.type,
+                     pml = coco.object@z,
+                     reml = (diag(dim(mod_DM)[1]) - mod_DM %*% solve(crossprod(mod_DM),t(mod_DM))) %*% coco.object@z), 
         "x_covariates" = mod_DM,
         "par.pos" = tmp_par_pos,
         "lambda" = coco.object@info$lambda,
@@ -227,7 +232,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
                                        transpose = TRUE, 
                                        upper.tri = TRUE))
         W <- crossprod(x_betas, V)
-        betass <- c(solve(W, t(V)) %*% rowSums(args_optim$z)) / dim(args_optim$z)[2]
+        betass <- c(solve(W, t(V)) %*% rowSums(coco.object@z)) / dim(coco.object@z)[2]
         names(betass) <- colnames(x_betas)
       }
       
@@ -242,7 +247,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       coco.object@info$boundaries <- tmp_boundaries
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
-      coco.object@info$optim.type <- "pmle"
+      coco.object@info$optim.type <- switch(optim.type, pml = "pml", reml = "reml")
       coco.object@info$safe <- safe
       coco.object@info$call <- match.call()
       
@@ -254,7 +259,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
   
   if (coco.object@type == "sparse") {
     
-    if(optim.type == "mle"){
+    if(optim.type == "ml"){
       
       # taper
       ref_taper <- coco.object@info$taper(
@@ -301,16 +306,16 @@ cocoOptim <- function(coco.object, boundaries = list(),
       coco.object@info$boundaries <- boundaries
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
-      coco.object@info$optim.type <- "mle"
+      coco.object@info$optim.type <- "ml"
       coco.object@info$safe <- safe
       coco.object@info$call <- match.call()
       
       return(coco.object)
     }
     
-    if(optim.type == "pmle"){
+    if(optim.type == "pml"){
       
-      if(!is.logical(designMatrix$par.pos$std.dev)){stop("at least a global sigma needs to be estimated for sparse pmle coco objects.")}
+      if(!is.logical(designMatrix$par.pos$std.dev)){stop("at least a global sigma needs to be estimated for sparse pml coco objects.")}
       
       # taper
       ref_taper <- coco.object@info$taper(
@@ -448,7 +453,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       coco.object@info$boundaries <- boundaries_temp
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
-      coco.object@info$optim.type <- "pmle"
+      coco.object@info$optim.type <- "pml"
       coco.object@info$safe <- safe
       coco.object@info$call <- match.call()
       

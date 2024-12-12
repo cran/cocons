@@ -186,13 +186,13 @@
   if(is.null(optim.control)){
     n_total <- 2 * n_pars + 1
   } else{
-    if(exists(optim.control$parallel$forward)){
+    if(!is.null(optim.control$parallel$forward)){
       if(optim.control$parallel$forward){
         n_total <- n_pars + 1
       }else{
       n_total <- 2 * n_pars + 1
     }
-    }
+    } else {n_total <- 2 * n_pars + 1}
   }
   
   n_total_t <- n_total
@@ -245,6 +245,10 @@
 .cocons.check.model.list <- function(model.list, data) {
   
   stopifnot("model.list not a list" = is.list(model.list))
+  
+  if(is.null(model.list$std.dev) || is.null(model.list$scale)){
+    stop("scale and std.dev must be specified.")
+  }
 
   if (any(!names(model.list) %in% getOption("cocons.Dictionary"))) {
     stop("aspect names do not match reference ones. Please check getOption(\"cocons.Dictionary\")")
@@ -259,7 +263,6 @@
   return(0)
 }
 
-# ADDED model.list here to check
 .cocons.check.info <- function(type, info, model.list, data){
   
   if (is.null(info$smooth.limits) & is.formula(model.list[6]$smooth)) {
@@ -274,11 +277,17 @@
     
   if(!is.null(info$smooth.limits)){
     if (info$smooth.limits[1] < 0) {
-      stop("lower bound smooth_limit is < 0 . Should be > 0")
+      stop("lower bound smooth_limit is <= 0 . Should be > 0")
     }
     
     if (info$smooth.limits[1] > info$smooth.limits[2]) {
       stop("lower bound smooth_limit is > upper bound . Should be the opposite.")
+    }
+  }
+  
+  if(!is.null(info$smooth.limits)){
+    if(is.formula(model.list$smooth) && (info$smooth.limits[1] == info$smooth.limits[2])){
+      stop("cannot estimate the smoothness when smooth.limits[1] = smooth.limits[2]")
     }
   }
   
@@ -405,7 +414,7 @@
   
   if(any(output$loginfo[,which(colnames(output$loginfo) == 'fn')] == 1e6)){
     which_ones <- which(output$loginfo[,which(colnames(output$loginfo) == 'fn')] == 1e6)
-    warning("ill-posed covariance matrix at iter/s ", paste0(which_ones,collapse = ","))
+    warning("ill-posed covariance matrix at evaluation/s ", paste0(which_ones,collapse = ","))
   }
   
   if(output$convergence != 0){
@@ -453,5 +462,19 @@
 .cocons.getDelta <- function(n, sigma, topDelta = 1e-9){
   
   return(sigma * topDelta * (1/(1+exp(- (n - 5000)/1000))))
+  
+}
+
+.cocons.updateNames <- function(namesToUpdate,DesignMatrix){
+  
+  for(ii in 1:length(namesToUpdate)){
+    
+    tmp_colnames <- colnames(DesignMatrix)
+    
+    namesToUpdate[ii] <- paste(sub("[0-9]+$", "", namesToUpdate[ii]), tmp_colnames[as.numeric(sub("^[a-zA-Z\\.]+", "", namesToUpdate[ii]))] )
+    
+  }
+  
+  return(namesToUpdate)
   
 }
