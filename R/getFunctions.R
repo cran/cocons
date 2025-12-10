@@ -38,12 +38,13 @@ getCovMatrix <- function(coco.object, type = "global", index = NULL){
   
   par.pos <- getDesignMatrix(coco.object@model.list, data = coco.object@data)$par.pos
   
+  theta_list <- cocons::getModelLists(coco.object@output$par,par.pos = par.pos, 
+                                      type = "diff")
+  
   if(coco.object@type == "dense"){
     
     if(type == "global"){
-      theta_list <- cocons::getModelLists(coco.object@output$par,par.pos = par.pos, 
-                                         type = "diff")
-      
+
       return(cocons::cov_rns(theta = theta_list,
                             locs = coco.object@locs,
                             x_covariates = x_covs,
@@ -59,10 +60,7 @@ getCovMatrix <- function(coco.object, type = "global", index = NULL){
   if(coco.object@type == "sparse"){
     
     if(type == "global"){
-      
-      theta_list <- cocons::getModelLists(coco.object@output$par,par.pos = par.pos, 
-                                         type = "diff")
-      
+
       # taper
       ref_taper <- coco.object@info$taper(
         spam::nearest.dist(coco.object@locs, delta = coco.object@info$delta, upper = NULL),
@@ -143,7 +141,7 @@ getDensityFromDelta <- function(coco.object, delta){
   
   coco.object@info$delta <- delta
   
-  return(summary(getCovMatrix(coco.object))$density)
+  return(summary(getCovMatrix(coco.object))$density / 100)
   
 }
 
@@ -618,6 +616,77 @@ getModelLists <- function(theta, par.pos, type = "diff"){
 }
 
 #' Simple build of boundaries
+#' @description provides a set of upper and lower bounds for the L-BFGS-B routine
+#' 
+#' @usage getBoundariesV4(coco.object, lower.bound, upper.bound)
+#' @param coco.object \code{(S4)} a coco.object.
+#' @param lower.bound \code{(numeric vector)} lower bound for covariate-driven parameters of the nonstationary covariance function.
+#' @param upper.bound \code{(numeric vector)} upper bound for covariate-driven parameters of the nonstationary covariance function.
+#' @returns (\code{list}) a list with boundaries and simple init values for the optim L-BFGS-B routine
+#' @author Federico Blasi
+#' 
+getBoundariesV4 <- function(coco.object, lower.bound = 2, upper.bound = 2){
+  
+  designMatrix <- getDesignMatrix(model.list = coco.object@model.list, data = coco.object@data)
+  
+  term_labels <- paste("z", "~" , paste(coco.object@model.list$mean)[2])
+  
+  # Skip scaling
+  if(any(colnames(coco.object@data[,coco.object@info$skip.scale]) %in% 
+         colnames(coco.object@data))){
+    tmp_info <- .cocons.setDesignMatrixCat(coco.object, designMatrix = designMatrix)
+    tmp_values <- tmp_info$tmp_values
+    mod_DM <- tmp_info$mod_DM
+  } else {
+    tmp_values <- cocons::getScale(designMatrix$model.matrix)
+    mod_DM <- tmp_values$std.covs      
+  }
+  
+  if(is.formula(coco.object@model.list$mean)){
+    coefs_lm <- stats::coef(stats::lm(term_labels,cbind.data.frame('z' = coco.object@z,mod_DM)))
+  } else{
+    coefs_lm <- c()
+  }
+  
+  boundaries_B <- getBoundariesV2(coco.object = coco.object,
+                                  mean.limits = c(-Inf, 0, Inf),
+                                  std.dev.limits = c(-lower.bound, 0, upper.bound),
+                                  scale.limits = c(-lower.bound, 0, upper.bound),
+                                  aniso.limits =  c(-lower.bound, 0, upper.bound),
+                                  tilt.limits =  c(-lower.bound, 0, upper.bound),
+                                  smooth.limits = c(-lower.bound, 0, upper.bound),
+                                  nugget.limits = c(-lower.bound, 0, upper.bound))
+  
+  if(is.formula(coco.object@model.list$mean)){
+    boundaries_B$theta_init[1:length(coefs_lm)] <- coefs_lm
+  }
+  
+  first_sd <- which(names(boundaries_B$theta_init) == "std.dev.limits")[1]
+  n_var <- length(which(names(boundaries_B$theta_init) == "std.dev.limits")) - 1
+  
+  first_range <- which(names(boundaries_B$theta_init) == "scale.limits")[1]
+  n_range <- length(which(names(boundaries_B$theta_init) == "scale.limits")) - 1
+  
+  first_smooth <- which(names(boundaries_B$theta_init) == "smooth.limits")[1]
+  n_smooth <- length(which(names(boundaries_B$theta_init) == "smooth.limits")) - 1
+  
+  boundaries_B$theta_init[first_range] <- (log(stats::sd(coco.object@z)) - log(stats::sd(c(stats::dist(coco.object@locs)))))/2
+  boundaries_B$theta_init[first_sd] <- (log(stats::sd(coco.object@z)) + log(stats::sd(c(stats::dist(coco.object@locs)))))/2
+  
+  boundaries_B$theta_upper[c(first_sd, first_range)] <- c(3 * abs(boundaries_B$theta_init[first_sd]), 3 * abs(boundaries_B$theta_init[first_range]))
+  boundaries_B$theta_lower[c(first_sd, first_range)] <- c(-3 * abs(boundaries_B$theta_init[first_sd]), -3 * abs(boundaries_B$theta_init[first_range]))
+  
+  boundaries_B$theta_upper[first_smooth] <- 3
+  boundaries_B$theta_lower[first_smooth] <- -3.5
+
+  boundaries_B$theta_init[1] <- mean(coco.object@z)
+  boundaries_B$theta_upper[1] <- boundaries_B$theta_init[1] + 3 * boundaries_B$theta_init[1]
+  boundaries_B$theta_lower[1] <- boundaries_B$theta_init[1] - 3 * boundaries_B$theta_init[1]
+  
+  return(boundaries_B)
+}
+
+#' Simple build of boundaries
 #' @description provides a generic set of upper and lower bounds for the L-BFGS-B routine
 #' 
 #' @usage getBoundaries(x, lower.value, upper.value)
@@ -627,7 +696,7 @@ getModelLists <- function(theta, par.pos, type = "diff"){
 #' @returns (\code{list}) a list with boundaries and simple init values for the optim L-BFGS-B routine
 #' @author Federico Blasi
 #' 
-getBoundaries <- function(x, lower.value, upper.value){
+getBoundaries <- function(x, lower.value = -2, upper.value = 2){
   
   if(upper.value < lower.value){stop("upper.value lower than lower.value")}
   
@@ -894,7 +963,7 @@ getHessian <- function(coco.object, ncores = parallel::detectCores() - 1,
                                    smooth.limits = coco.object@info$smooth.limits, 
                                    n = n, 
                                    z = coco.object@z,
-                                   lambda = coco.object@info$lambda)
+                                   lambda = c(coco.object@info$lambda.Sigma, coco.object@info$lambda.betas, coco.object@info$lambda.reg))
       
     } else{f00 <- coco.object@output$value}
     
@@ -925,7 +994,7 @@ getHessian <- function(coco.object, ncores = parallel::detectCores() - 1,
                                                                                     smooth.limits = coco.object@info$smooth.limits, 
                                                                                     n = n, 
                                                                                     z = coco.object@z,
-                                                                                    lambda = coco.object@info$lambda)
+                                                                                    lambda = c(coco.object@info$lambda.Sigma, coco.object@info$lambda.betas, coco.object@info$lambda.reg))
                                              
                                              f10 <- cocons::GetNeg2loglikelihood(t10, par.pos = par.pos,
                                                                                     locs = coco.object@locs,
@@ -933,7 +1002,7 @@ getHessian <- function(coco.object, ncores = parallel::detectCores() - 1,
                                                                                     smooth.limits = coco.object@info$smooth.limits, 
                                                                                     n = n, 
                                                                                     z = coco.object@z,
-                                                                                    lambda = coco.object@info$lambda)
+                                                                                    lambda = c(coco.object@info$lambda.Sigma, coco.object@info$lambda.betas, coco.object@info$lambda.reg))
                                              
                                              f11 <- cocons::GetNeg2loglikelihood(t11, par.pos = par.pos,
                                                                                     locs = coco.object@locs,
@@ -941,7 +1010,7 @@ getHessian <- function(coco.object, ncores = parallel::detectCores() - 1,
                                                                                     smooth.limits = coco.object@info$smooth.limits, 
                                                                                     n = n, 
                                                                                     z = coco.object@z, 
-                                                                                    lambda = coco.object@info$lambda)
+                                                                                    lambda = c(coco.object@info$lambda.Sigma, coco.object@info$lambda.betas, coco.object@info$lambda.reg))
                                              
                                              0.5 * ((f11 - f01 - f10 + f00) / (eps*eps))
                                            })
@@ -1009,7 +1078,7 @@ getHessian <- function(coco.object, ncores = parallel::detectCores() - 1,
                                                cholS = cholS,
                                                z = coco.object@z,
                                                n = n,
-                                               lambda = coco.object@info$lambda)
+                                               lambda = c(coco.object@info$lambda.Sigma, coco.object@info$lambda.betas, coco.object@info$lambda.reg))
       
     } else{f00 <- coco.object@output$value}
 
@@ -1044,7 +1113,7 @@ getHessian <- function(coco.object, ncores = parallel::detectCores() - 1,
                                                                                           cholS = cholS,
                                                                                           z = coco.object@z,
                                                                                           n = n,
-                                                                                          lambda = coco.object@info$lambda)
+                                                                                          lambda = c(coco.object@info$lambda.Sigma, coco.object@info$lambda.betas, coco.object@info$lambda.reg))
                                              
                                              f10 <- cocons::GetNeg2loglikelihoodTaper(theta = t10,
                                                                                           par.pos = par.pos,
@@ -1055,7 +1124,7 @@ getHessian <- function(coco.object, ncores = parallel::detectCores() - 1,
                                                                                           cholS = cholS,
                                                                                           z = coco.object@z,
                                                                                           n = n,
-                                                                                          lambda = coco.object@info$lambda)
+                                                                                          lambda = c(coco.object@info$lambda.Sigma, coco.object@info$lambda.betas, coco.object@info$lambda.reg))
                                              
                                              f11 <- cocons::GetNeg2loglikelihoodTaper(theta = t11,
                                                                                           par.pos = par.pos,
@@ -1066,7 +1135,7 @@ getHessian <- function(coco.object, ncores = parallel::detectCores() - 1,
                                                                                           cholS = cholS,
                                                                                           z = coco.object@z,
                                                                                           n = n,
-                                                                                          lambda = coco.object@info$lambda)
+                                                                                          lambda = c(coco.object@info$lambda.Sigma, coco.object@info$lambda.betas, coco.object@info$lambda.reg))
                                              
                                              0.5 * ((f11 - f01 - f10 + f00) / (eps*eps))
                                              

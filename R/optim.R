@@ -9,7 +9,7 @@
 #' optim.type, optim.control)
 #' 
 #' @param coco.object (\code{S4}) A \link{coco} object.
-#' @param boundaries (\code{list}) If provided, a list containing lower, initial, and upper values for the parameters, as defined by \link{getBoundaries}. If not provided, these values are automatically computed with global lower and upper bounds set to -2 and 2.
+#' @param boundaries (\code{list}) If provided, a list containing lower, initial, and upper values for the parameters, as defined by \link{getBoundaries}. If not provided, these values are automatically computed via getBoundariesV4 with global lower and upper bounds set to -3 and 3.
 #' @param ncores (\code{character} or \code{integer}) The number of threads to use for the optimization. If set to `"auto"`, the number of threads is chosen based on system capabilities or a fraction of the available cores.
 #' @param optim.type (\code{character}) The optimization approach. Options include:
 #' @param safe (\code{logical}) If `TRUE`, the function avoids Cholesky decomposition errors due to ill-posed covariance matrices by returning a pre-defined large value. Defaults to `TRUE`.
@@ -37,15 +37,16 @@
 #'                    'smooth' = 3/2,
 #'                    'nugget' = -Inf)
 #'                    
+#' sample_index <- sample(1:dim(holes[[1]])[1],200)
+#'                    
 #' coco_object <- coco(type = 'dense',
-#'                     data = holes[[1]][1:100,],
-#'                     locs = as.matrix(holes[[1]][1:100,1:2]),
-#'                     z = holes[[1]][1:100,]$z,
+#'                     data = holes[[1]][sample_index, ],
+#'                     locs = as.matrix(holes[[1]][sample_index,1:2]),
+#'                     z = holes[[1]][sample_index, ]$z,
 #'                     model.list = model.list)
 #'                     
 #' optim_coco <- cocoOptim(coco_object,
-#' boundaries = getBoundaries(coco_object,
-#' lower.value = -3, 3))
+#' boundaries = getBoundaries(coco_object,-3,3))
 #' 
 #' plotOptimInfo(optim_coco)
 #' 
@@ -55,7 +56,7 @@
 #' 
 #' plot(optim_coco, type = 'correlations', index = c(2,3,5))
 #' 
-#' summary(optim_coco)
+#' summary(optim_coco,inv.hess = getHessian(optim_coco))
 #'  
 #' getEstims(optim_coco)
 #' 
@@ -91,10 +92,10 @@ cocoOptim <- function(coco.object, boundaries = list(),
     
     # Check boundaries
     if(length(boundaries) == 0){
-      boundaries <- cocons::getBoundaries(
-        x = coco.object, 
-        lower.value = -2,
-        upper.value = 2)
+      boundaries <- cocons::getBoundariesV4(
+        coco.object = coco.object, 
+        lower.bound = -3,
+        upper.bound = 3)
     } else{
       .cocons.check.boundaries(coco.object, boundaries)
     }
@@ -125,6 +126,109 @@ cocoOptim <- function(coco.object, boundaries = list(),
   
   if (coco.object@type == "dense") {
     
+    if(any(c(coco.object@info$lambda.betas, coco.object@info$lambda.Sigma) > 0) && optim.type == "ml"){
+      
+      if(is.null(coco.object@info$sparse.point)){
+        coco.object@info$sparse.point <- getOption("cocons.sparse.point")
+      }
+      
+      parallel::setDefaultCluster(cl = cl)
+      parallel::clusterEvalQ(cl, library("cocons"))
+      
+      args_optim <- list(
+        "fn" = cocons::GetNeg2loglikelihood,
+        "method" = "L-BFGS-B",
+        "lower" = boundaries$theta_lower,
+        "par" = boundaries$theta_init,
+        "upper" = boundaries$theta_upper,
+        "n" = dim(coco.object@z)[1],
+        "smooth.limits" = coco.object@info$smooth.limits,
+        "z" = coco.object@z,
+        "x_covariates" = mod_DM,
+        "par.pos" = designMatrix$par.pos,
+        "lambda" = c(coco.object@info$lambda.Sigma, coco.object@info$lambda.betas, coco.object@info$lambda.reg),
+        "locs" = coco.object@locs,
+        "safe" = safe
+      )
+      
+      rm(designMatrix)
+      
+      # Call optim routine
+      output_dense <- do.call(what = optimParallel::optimParallel, args = c(
+        args_optim,
+        optim.control
+      ))
+      
+      coco_pen <- .cocons.update.coco.first.step(coco.object, output_dense, boundaries)
+      
+      # .cocons.check.convergence(output_dense, boundaries)
+      
+      # Create again design matrix
+      
+      if(T){
+        
+        designMatrix <- cocons::getDesignMatrix(
+          model.list = coco_pen@model.list,
+          data = coco_pen@data
+        )
+        
+        # Skip scaling
+        if(any(colnames(coco_pen@data[,coco_pen@info$skip.scale]) %in% 
+               colnames(coco_pen@data))){
+          tmp_info <- .cocons.setDesignMatrixCat(coco_pen, designMatrix = designMatrix)
+          tmp_values <- tmp_info$tmp_values
+          mod_DM <- tmp_info$mod_DM
+        } else {
+          tmp_values <- cocons::getScale(designMatrix$model.matrix)
+          mod_DM <- tmp_values$std.covs      
+        }
+        
+        args_optim <- list(
+          "fn" = cocons::GetNeg2loglikelihood,
+          "method" = "L-BFGS-B",
+          "lower" = coco_pen@info$boundaries$theta_lower,
+          "par" = coco_pen@info$boundaries$theta_init,
+          "upper" = coco_pen@info$boundaries$theta_upper,
+          "n" = dim(coco_pen@z)[1],
+          "smooth.limits" = coco_pen@info$smooth.limits,
+          "z" = coco_pen@z,
+          "x_covariates" = mod_DM,
+          "par.pos" = designMatrix$par.pos,
+          "lambda" = c(0, 0, coco_pen@info$lambda.reg),
+          "locs" = coco_pen@locs,
+          "safe" = safe
+        )  
+      }
+      
+      # 
+      
+      output_dense_two <- do.call(what = optimParallel::optimParallel, args = c(
+        args_optim,
+        optim.control
+      ))
+      
+      coco_pen@output <- output_dense_two
+      
+      boundaries_two <- list(theta_init = args_optim$par,
+                             theta_upper = args_optim$upper,
+                             theta_lower = args_optim$lower)
+      
+      .cocons.check.convergence(output_dense_two, boundaries_two)
+      
+      # END ADDED
+      
+      coco_pen@info$optim.control <- optim.control
+      coco_pen@info$boundaries <- boundaries_two
+      coco_pen@info$mean.vector <- tmp_values$mean.vector
+      coco_pen@info$sd.vector <- tmp_values$sd.vector
+      coco_pen@info$optim.type <- "ml"
+      coco_pen@info$safe <- safe
+      coco_pen@info$call <- match.call()
+      
+      return(coco_pen)
+      
+    }
+      
     if(optim.type == "ml"){
 
       parallel::setDefaultCluster(cl = cl)
@@ -141,7 +245,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
         "z" = coco.object@z,
         "x_covariates" = mod_DM,
         "par.pos" = designMatrix$par.pos,
-        "lambda" = coco.object@info$lambda,
+        "lambda" = c(0, 0, coco.object@info$lambda.reg),
         "locs" = coco.object@locs,
         "safe" = safe
       )
@@ -157,6 +261,8 @@ cocoOptim <- function(coco.object, boundaries = list(),
       .cocons.check.convergence(output_dense, boundaries)
       
       coco.object@output <- output_dense
+      
+      coco.object@info$optim.control <- optim.control
       coco.object@info$boundaries <- boundaries
       coco.object@info$mean.vector <- tmp_values$mean.vector
       coco.object@info$sd.vector <- tmp_values$sd.vector
@@ -205,7 +311,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
                      reml = (diag(dim(mod_DM)[1]) - mod_DM %*% solve(crossprod(mod_DM),t(mod_DM))) %*% coco.object@z), 
         "x_covariates" = mod_DM,
         "par.pos" = tmp_par_pos,
-        "lambda" = coco.object@info$lambda,
+        "lambda" = c(0, 0, coco.object@info$lambda.reg),
         "locs" = coco.object@locs,
         "x_betas" = x_betas,
         "safe" = safe
@@ -243,6 +349,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       .cocons.check.convergence(output_dense, tmp_boundaries)
       
+      coco.object@info$optim.control <- optim.control
       coco.object@output <- output_dense
       coco.object@info$boundaries <- tmp_boundaries
       coco.object@info$mean.vector <- tmp_values$mean.vector
@@ -259,6 +366,117 @@ cocoOptim <- function(coco.object, boundaries = list(),
   
   if (coco.object@type == "sparse") {
     
+    if(any(c(coco.object@info$lambda.betas, coco.object@info$lambda.Sigma) > 0) && optim.type == "ml"){
+      
+      if(is.null(coco.object@info$sparse.point)){
+        coco.object@info$sparse.point <- getOption("cocons.sparse.point")
+      }
+      
+      # taper
+      ref_taper <- coco.object@info$taper(
+        spam::nearest.dist(coco.object@locs, delta = coco.object@info$delta, upper = NULL),
+        theta = c(coco.object@info$delta, 1)
+      )
+      
+      print(summary(ref_taper))
+      
+      parallel::setDefaultCluster(cl = cl)
+      parallel::clusterEvalQ(cl, library("cocons"))
+      parallel::clusterEvalQ(cl, library("spam"))
+      parallel::clusterEvalQ(cl, options(spam.cholupdatesingular = "error"))
+      parallel::clusterEvalQ(cl, options(spam.cholsymmetrycheck = FALSE))
+      
+      args_optim <- list(
+        "fn" = cocons::GetNeg2loglikelihoodTaper,
+        "method" = "L-BFGS-B",
+        "lower" = boundaries$theta_lower,
+        "par" = boundaries$theta_init,
+        "upper" = boundaries$theta_upper,
+        "par.pos" = designMatrix$par.pos,
+        "ref_taper" = ref_taper,
+        "locs" = coco.object@locs,
+        "x_covariates" = mod_DM,
+        "smooth.limits" = coco.object@info$smooth.limits,
+        "cholS" = spam::chol.spam(ref_taper),
+        "z" = coco.object@z,
+        "n" = dim(coco.object@z)[1],
+        "lambda" = c(coco.object@info$lambda.Sigma, coco.object@info$lambda.betas, coco.object@info$lambda.reg),
+        "safe" = safe
+      )
+      
+      # Call optim routine
+      output_taper <- do.call(what = optimParallel::optimParallel, args = c(
+        args_optim,
+        optim.control
+      ))
+      
+      coco_pen <- .cocons.update.coco.first.step(coco.object, output_taper, boundaries)
+      
+      # Create again design matrix
+      
+      if(T){
+        
+        designMatrix <- cocons::getDesignMatrix(
+          model.list = coco_pen@model.list,
+          data = coco_pen@data
+        )
+        
+        # Skip scaling
+        if(any(colnames(coco_pen@data[,coco_pen@info$skip.scale]) %in% 
+               colnames(coco_pen@data))){
+          tmp_info <- .cocons.setDesignMatrixCat(coco_pen, designMatrix = designMatrix)
+          tmp_values <- tmp_info$tmp_values
+          mod_DM <- tmp_info$mod_DM
+        } else {
+          tmp_values <- cocons::getScale(designMatrix$model.matrix)
+          mod_DM <- tmp_values$std.covs      
+        }
+        
+        args_optim <- list(
+          "fn" = cocons::GetNeg2loglikelihoodTaper,
+          "method" = "L-BFGS-B",
+          "lower" = coco_pen@info$boundaries$theta_lower,
+          "par" = coco_pen@info$boundaries$theta_init,
+          "upper" = coco_pen@info$boundaries$theta_upper,
+          "par.pos" = designMatrix$par.pos,
+          "ref_taper" = ref_taper,
+          "locs" = coco_pen@locs,
+          "x_covariates" = mod_DM,
+          "smooth.limits" = coco_pen@info$smooth.limits,
+          "cholS" = spam::chol.spam(ref_taper),
+          "z" = coco_pen@z,
+          "n" = dim(coco.object@z)[1],
+          "lambda" = c(0, 0, coco_pen@info$lambda.reg),
+          "safe" = safe
+        )
+        
+      }
+        
+      output_taper_two <- do.call(what = optimParallel::optimParallel, args = c(
+        args_optim,
+        optim.control
+      ))
+      
+      coco_pen@output <- output_taper_two
+      
+      boundaries_two <- list(theta_init = args_optim$par,
+                             theta_upper = args_optim$upper,
+                             theta_lower = args_optim$lower)
+      
+      .cocons.check.convergence(output_taper_two, boundaries_two)
+      
+      coco_pen@info$optim.control <- optim.control
+      coco_pen@info$boundaries <- boundaries_two
+      coco_pen@info$mean.vector <- tmp_values$mean.vector
+      coco_pen@info$sd.vector <- tmp_values$sd.vector
+      coco_pen@info$optim.type <- "ml"
+      coco_pen@info$safe <- safe
+      coco_pen@info$call <- match.call()
+      
+      return(coco_pen)
+        
+      }
+      
     if(optim.type == "ml"){
       
       # taper
@@ -290,7 +508,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
         "cholS" = spam::chol.spam(ref_taper),
         "z" = coco.object@z,
         "n" = dim(coco.object@z)[1],
-        "lambda" = coco.object@info$lambda,
+        "lambda" = c(0, 0, coco.object@info$lambda.reg),
         "safe" = safe
       )
       
@@ -302,6 +520,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       .cocons.check.convergence(output_taper, boundaries)
       
+      coco.object@info$optim.control <- optim.control
       coco.object@output <- output_taper
       coco.object@info$boundaries <- boundaries
       coco.object@info$mean.vector <- tmp_values$mean.vector
@@ -328,7 +547,6 @@ cocoOptim <- function(coco.object, boundaries = list(),
       parallel::setDefaultCluster(cl = cl)
       parallel::clusterEvalQ(cl, library("cocons"))
       parallel::clusterEvalQ(cl, library("spam"))
-      #parallel::clusterEvalQ(cl, library("spam64"))
       parallel::clusterEvalQ(cl, options(spam.cholupdatesingular = "error"))
       parallel::clusterEvalQ(cl, options(spam.cholsymmetrycheck = FALSE))
       
@@ -360,7 +578,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
         "cholS" = spam::chol.spam(ref_taper),
         "z" = coco.object@z,
         "n" = dim(coco.object@z)[1],
-        "lambda" = coco.object@info$lambda,
+        "lambda" = c(0, 0, coco.object@info$lambda.reg),
         "safe" = safe
       )
       
@@ -414,12 +632,18 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       new_pars <- c(new_pars, first_par)
       
-      if(is.logical(args_optim$par.pos$std.dev)){
+      if(is.logical(args_optim$par.pos$std.dev) & any(args_optim$par.pos$std.dev[-1])){
         new_pars <- c(new_pars, output_taper$par[first_sigma:(first_sigma + sum(args_optim$par.pos$std.dev) - 1)])
       }
       
       if(is.logical(args_optim$par.pos$scale)){
-        new_pars <- c(new_pars, second_par, output_taper$par[(first_scale+1):(first_scale + sum(args_optim$par.pos$scale) - 1)])
+        
+        if(any(args_optim$par.pos$scale[-1])){
+          new_pars <- c(new_pars, second_par, output_taper$par[(first_scale+1):(first_scale + sum(args_optim$par.pos$scale) - 1)])
+        } else{
+          new_pars <- c(new_pars, second_par)
+        }
+        
         first_smooth <- first_scale + if(is.logical(args_optim$par.pos$scale)){sum(args_optim$par.pos$scale)}
       } else{
         first_smooth <- first_scale
@@ -449,6 +673,7 @@ cocoOptim <- function(coco.object, boundaries = list(),
       
       .cocons.check.convergence(output_taper, boundaries_temp)
       
+      coco.object@info$optim.control <- optim.control
       coco.object@output <- output_taper
       coco.object@info$boundaries <- boundaries_temp
       coco.object@info$mean.vector <- tmp_values$mean.vector
@@ -463,3 +688,4 @@ cocoOptim <- function(coco.object, boundaries = list(),
   }
   
 }
+  
